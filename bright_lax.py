@@ -107,6 +107,12 @@ if not st.session_state.teams.empty:
         save_data()
         st.sidebar.success(f"Team '{team_to_remove}' has been removed!")
 
+# Display current rankings
+st.header("Current Rankings")
+if not st.session_state.teams.empty:
+    ranked_df = calculate_rankings(st.session_state.teams)
+    st.dataframe(ranked_df)
+st.markdown("---")
 # Section to input game results
 st.header("Input Game Result")
 if len(st.session_state.teams) >= 2:
@@ -162,12 +168,8 @@ if len(st.session_state.teams) >= 2:
             )
             save_data()
             st.success("Game result recorded!")
+            st.rerun()
 
-# Display current rankings
-st.header("Current Rankings")
-if not st.session_state.teams.empty:
-    ranked_df = calculate_rankings(st.session_state.teams)
-    st.dataframe(ranked_df)
 
 # Display game history with delete option
 st.header("Game History")
@@ -176,7 +178,7 @@ if st.session_state.games:
         col1, col2 = st.columns([5, 1])
         with col1:
             st.write(
-                f"{game['Team 1']} ({game['Score 1']}) vs {game['Team 2']} ({game['Score 2']})"
+                f"{game['Team 1']} ({game['Score 1']}) - {game['Team 2']} ({game['Score 2']})"
             )
         with col2:
             if st.button("🗑️", key=f"delete_{i}"):
