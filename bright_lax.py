@@ -4,9 +4,49 @@ import os
 
 
 def calculate_rankings(df):
-    df["Point Differential"] = df["Points For"] - df["Points Against"]
+    df["Games Played"] = df["Wins"] + df["Losses"]
+    df["Win Percentage"] = df["Wins"] / df["Games Played"].replace(0, 1)
+
+    # Calculate Opponent Strength (Average Win Percentage of Opponents)
+    opponent_strength = {}
+    for team in df["Team"]:
+        opponents = [
+            game["Team 2"] if game["Team 1"] == team else game["Team 1"]
+            for game in st.session_state.games
+            if game["Team 1"] == team or game["Team 2"] == team
+        ]
+        win_percentages = [
+            df[df["Team"] == opp]["Win Percentage"].values[0]
+            for opp in opponents
+            if not df[df["Team"] == opp].empty
+        ]
+        opponent_strength[team] = (
+            sum(win_percentages) / len(win_percentages) if win_percentages else 0
+        )
+
+    # Weighted Point Differential Calculation
+    weighted_diff = []
+    for _, row in df.iterrows():
+        team = row["Team"]
+        weighted_for = 0
+        weighted_against = 0
+        for game in st.session_state.games:
+            if game["Team 1"] == team:
+                opp_strength = opponent_strength.get(game["Team 2"], 0)
+                weighted_for += game["Score 1"] * opp_strength
+                weighted_against += game["Score 2"] * opp_strength
+            elif game["Team 2"] == team:
+                opp_strength = opponent_strength.get(game["Team 1"], 0)
+                weighted_for += game["Score 2"] * opp_strength
+                weighted_against += game["Score 1"] * opp_strength
+        weighted_diff.append(weighted_for - weighted_against)
+
+    df["Weighted Point Differential"] = weighted_diff
+
+    # Final Sorting Logic
     ranked_df = df.sort_values(
-        by=["Wins", "Point Differential", "Points For"], ascending=[False, False, False]
+        by=["Win Percentage", "Weighted Point Differential", "Points For"],
+        ascending=[False, False, False],
     ).reset_index(drop=True)
     ranked_df.index += 1
     ranked_df.insert(0, "Rank", ranked_df.index)
@@ -42,32 +82,6 @@ st.text(
 )
 
 # Sidebar for team management
-st.sidebar.header("Team Management")
-
-# Register New Team
-new_team = st.sidebar.text_input("Enter Team Name").strip()
-if st.sidebar.button("Add Team") and new_team:
-    if (
-        not st.session_state.teams["Team"]
-        .str.contains(f"^{new_team}$", case=False)
-        .any()
-    ):
-        new_row = pd.DataFrame(
-            {
-                "Team": [new_team],
-                "Wins": [0],
-                "Losses": [0],
-                "Points For": [0],
-                "Points Against": [0],
-            }
-        )
-        st.session_state.teams = pd.concat(
-            [st.session_state.teams, new_row], ignore_index=True
-        )
-        save_data()
-        st.sidebar.success(f"Team '{new_team}' added!")
-    else:
-        st.sidebar.warning("Team already exists!")
 
 # Rename Team
 if not st.session_state.teams.empty:
@@ -106,13 +120,78 @@ if not st.session_state.teams.empty:
         ].reset_index(drop=True)
         save_data()
         st.sidebar.success(f"Team '{team_to_remove}' has been removed!")
+st.sidebar.header("Team Management")
+
+# Register New Team
+new_team = st.sidebar.text_input("Enter Team Name").strip()
+if st.sidebar.button("Add Team") and new_team:
+    if (
+        not st.session_state.teams["Team"]
+        .str.contains(f"^{new_team}$", case=False)
+        .any()
+    ):
+        new_row = pd.DataFrame(
+            {
+                "Team": [new_team],
+                "Wins": [0],
+                "Losses": [0],
+                "Points For": [0],
+                "Points Against": [0],
+            }
+        )
+        st.session_state.teams = pd.concat(
+            [st.session_state.teams, new_row], ignore_index=True
+        )
+        save_data()
+        st.sidebar.success(f"Team '{new_team}' added!")
+    else:
+        st.sidebar.warning("Team already exists!")
 
 # Display current rankings
 st.header("Current Rankings")
 if not st.session_state.teams.empty:
     ranked_df = calculate_rankings(st.session_state.teams)
     st.dataframe(ranked_df)
+
+st.markdown(
+    """
+### **Ranking Methodology Explained**
+
+The team rankings are determined using a **weighted and fair system** that considers multiple factors to ensure accuracy and competitiveness:
+
+1. **Win Percentage**  
+   - Calculated as:
+"""
+)
+
+st.latex(r"\text{Win Percentage} = \frac{\text{Wins}}{\text{Total Games Played}}")
+
+st.markdown(
+    """
+   - Reflects the overall success rate of each team.
+
+2. **Opponent Strength (Strength of Schedule)**  
+   - The **average win percentage** of the opponents a team has faced.  
+   - Teams that compete against stronger opponents will be ranked higher if they perform well.  
+   - This ensures fairness by acknowledging the difficulty of the competition.
+
+3. **Weighted Point Differential**  
+   - Points scored and conceded are **weighted based on opponent strength**.  
+   - Scoring against stronger teams carries **more weight**, while conceding points to weaker teams is **penalized more**.  
+   - This encourages teams to perform consistently, regardless of their opponents.
+
+4. **Tiebreakers**  
+   - If teams have identical records, the following are considered in order:  
+     - **Head-to-Head Results**: Which team won when they played each other.  
+     - **Strength of Schedule**: The difficulty of the opponents faced.  
+     - **Weighted Point Differential**: The adjusted difference between points scored and conceded.
+
+
+This system is designed to **reward consistent performance**, encourage competitive play, and ensure that rankings reflect not just wins and losses but the **quality of competition and overall gameplay**.
+"""
+)
 st.markdown("---")
+
 # Section to input game results
 st.header("Input Game Result")
 if len(st.session_state.teams) >= 2:
@@ -170,7 +249,6 @@ if len(st.session_state.teams) >= 2:
             st.success("Game result recorded!")
             st.rerun()
 
-
 # Display game history with delete option
 st.header("Game History")
 if st.session_state.games:
@@ -203,12 +281,3 @@ if st.session_state.games:
                 st.session_state.games.pop(i)
                 save_data()
                 st.rerun()
-
-# Reset option in the sidebar
-if st.sidebar.button("Reset All Data"):
-    st.session_state.teams = pd.DataFrame(
-        columns=["Team", "Wins", "Losses", "Points For", "Points Against"]
-    )
-    st.session_state.games = []
-    save_data()
-    st.sidebar.success("All data has been reset.")
